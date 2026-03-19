@@ -13,7 +13,9 @@ app = Flask(__name__)
 def get_sentiment_data(gallery_id, days, is_minor=True):
     """DB에서 데이터를 가져와 분석에 필요한 형태로 반환합니다."""
     db = DBManager()
-    target_date = (datetime.now(KST) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    target_date = (datetime.now(KST) - timedelta(days=days)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).strftime('%Y-%m-%d %H:%M:%S')
     
     try:
         if not db.client:
