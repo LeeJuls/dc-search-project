@@ -17,7 +17,7 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True):
     """
     db = DBManager()
     analyzer = SentimentAnalyzer(db)
-    reporter = ReportGenerator(db.db_name)
+    reporter = ReportGenerator()
     
     print(f"\n--- '{gallery_id}' ({'마이너' if is_minor else '메이저'}) 갤러리 프로젝트 가동 ---")
     
