@@ -3,3 +3,6 @@ beautifulsoup4
 pandas
 openai
 python-dotenv
+flask
+supabase
+gunicorn

@@ -1,6 +1,5 @@
 import os
 import json
-import sqlite3
 from openai import OpenAI
 from dotenv import load_dotenv
 import pandas as pd
@@ -29,26 +28,31 @@ class SentimentAnalyzer:
         default_words = {
             "갓겜": 0.9, "망겜": -0.9, "재밌다": 0.7, "노잼": -0.7, 
             "기대": 0.5, "실망": -0.5, "공개": 0.1, "출시": 0.2,
-            "업데이트": 0.3, "망함": -0.8, "대박": 0.8, "역대급": 0.9,
+            "업데이트": 0.3, "망함": -0.8, "대박": 0.8, "역대급": 0.2, # 점수 하향 (부정적 문맥 고려)
             "쓰레기": -0.9, "정공": -0.4, "정구지": 0.2, "쿠키런": 0.1,
             "오븐스매시": 0.1, "최고": 0.8, "지린다": 0.7, "미쳤다": 0.6,
             "병맛": -0.3, "혐": -0.8, "별로": -0.4, "그닥": -0.3,
-            "11일": 0.1, "데브": 0.0, "확장": 0.2, "무한": 0.2
+            "피로도": -0.7, "노가다": -0.6, "나락": -0.8, "접는다": -0.9,
+            "삭제": -0.8, "토나와": -0.8, "무한": 0.1, "혜자": 0.8, "창렬": -0.8
         }
-        with sqlite3.connect(self.db.db_name) as conn:
-            cursor = conn.cursor()
-            for word, score in default_words.items():
-                cursor.execute('''
-                    INSERT OR IGNORE INTO lexicon (word, score, updated_at)
-                    VALUES (?, ?, ?)
-                ''', (word, score, datetime.now()))
-            conn.commit()
+        
+        data = []
+        for word, score in default_words.items():
+            data.append({"word": word, "score": score, "updated_at": datetime.now().isoformat()})
+        try:
+            self.db.client.table('lexicon').upsert(data, on_conflict='word').execute()
+        except Exception as e:
+            print(f"기본 사전 초기화 오류: {e}")
 
     def _load_lexicon(self):
         """DB에서 로컬 감성 사전을 불러옵니다."""
-        with sqlite3.connect(self.db.db_name) as conn:
-            df = pd.read_sql("SELECT word, score FROM lexicon", conn)
-            return dict(zip(df['word'], df['score']))
+        try:
+            response = self.db.client.table('lexicon').select('word, score').execute()
+            if hasattr(response, 'data') and response.data:
+                return {item['word']: item['score'] for item in response.data}
+        except Exception as e:
+            print(f"로컬 감성 사전 로드 오류: {e}")
+        return {}
 
     def update_lexicon_with_llm(self, sample_titles):
         """
@@ -74,7 +78,7 @@ class SentimentAnalyzer:
             print("AI에게 최신 여론 및 신조어 학습 중 (OpenRouter)...")
             # OpenRouter 무료 모델 재시도
             response = self.client.chat.completions.create(
-                model="google/gemini-2.0-flash-exp:free",
+                model="meta-llama/llama-3.2-3b-instruct:free",
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -84,14 +88,14 @@ class SentimentAnalyzer:
                 
             new_lexicon = json.loads(content)
             
-            with sqlite3.connect(self.db.db_name) as conn:
-                cursor = conn.cursor()
-                for word, score in new_lexicon.items():
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO lexicon (word, score, updated_at)
-                        VALUES (?, ?, ?)
-                    ''', (word, score, datetime.now()))
-                conn.commit()
+            data = []
+            for word, score in new_lexicon.items():
+                data.append({"word": word, "score": score, "updated_at": datetime.now().isoformat()})
+            
+            try:
+                self.db.client.table('lexicon').upsert(data, on_conflict='word').execute()
+            except Exception as e:
+                print(f"LLM 신조어 DB 반영 오류: {e}")
             
             print(f"새로운 단어 {len(new_lexicon)}개가 사전에 반영되었습니다.")
             self.lexicon = self._load_lexicon()
@@ -113,23 +117,28 @@ class SentimentAnalyzer:
 
     def process_all_unbound_posts(self, force=False):
         """아직 분석되지 않은 게시글을 분석합니다."""
-        query = "SELECT id, title FROM posts"
-        if not force:
-            query += " WHERE analyzed_at IS NULL"
+        try:
+            query = self.db.client.table('posts').select('id, title')
+            if not force:
+                query = query.is_('analyzed_at', 'null')
             
-        with sqlite3.connect(self.db.db_name) as conn:
-            df = pd.read_sql(query, conn)
-            
-            if df.empty:
+            response = query.execute()
+            if not hasattr(response, 'data') or not response.data:
                 return 0
-            
-            cursor = conn.cursor()
-            for _, row in df.iterrows():
+                
+            updates = []
+            for row in response.data:
                 score = self.analyze_locally(row['title'])
-                cursor.execute('''
-                    UPDATE posts 
-                    SET sentiment_score = ?, analyzed_at = ? 
-                    WHERE id = ?
-                ''', (score, datetime.now(), row['id']))
-            conn.commit()
-            return len(df)
+                updates.append({
+                    'id': row['id'], 
+                    'sentiment_score': score, 
+                    'analyzed_at': datetime.now().isoformat()
+                })
+            
+            if updates:
+                self.db.client.table('posts').upsert(updates).execute()
+            
+            return len(updates)
+        except Exception as e:
+            print(f"게시글 감성 분석 처리 중 오류: {e}")
+            return 0
