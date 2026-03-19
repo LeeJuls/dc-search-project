@@ -10,6 +10,7 @@ class DBManager:
     데이터베이스 연결 및 테이블 관리를 담당하는 클래스입니다. (Supabase 버전)
     """
     def __init__(self):
+        self.client = None
         url: str = os.environ.get("SUPABASE_URL", "")
         key: str = os.environ.get("SUPABASE_KEY", "")
         if not url or not key:

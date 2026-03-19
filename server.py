@@ -32,25 +32,25 @@ def get_sentiment_data(gallery_id, days):
     if df.empty:
         return 'ERROR: 데이터프레임 변환 후 비어있습니다.'
 
-        # 공감 포인트 계산 (조회수 + 추천수 + 댓글수)
-        df['engagement_score'] = df['views'] + df['recommend'] + df['comment_count']
+    # 공감 포인트 계산 (조회수 + 추천수 + 댓글수)
+    df['engagement_score'] = df['views'] + df['recommend'] + df['comment_count']
 
-        total = len(df)
-        # 긍정/부정 필터링 후 공감 포인트 높은 순으로 정렬
-        pos_df = df[df['sentiment_score'] > 0.1].sort_values(by='engagement_score', ascending=False)
-        neg_df = df[df['sentiment_score'] < -0.1].sort_values(by='engagement_score', ascending=False)
-        
-        return {
-            'gallery_id': gallery_id,
-            'days': days,
-            'total_count': total,
-            'avg_score': df['sentiment_score'].mean(),
-            'pos_count': len(pos_df),
-            'neg_count': len(neg_df),
-            'neu_count': total - len(pos_df) - len(neg_df),
-            'pos_posts': pos_df.head(10).to_dict('records'),
-            'neg_posts': neg_df.head(10).to_dict('records')
-        }
+    total = len(df)
+    # 긍정/부정 필터링 후 공감 포인트 높은 순으로 정렬
+    pos_df = df[df['sentiment_score'] > 0.1].sort_values(by='engagement_score', ascending=False)
+    neg_df = df[df['sentiment_score'] < -0.1].sort_values(by='engagement_score', ascending=False)
+
+    return {
+        'gallery_id': gallery_id,
+        'days': days,
+        'total_count': total,
+        'avg_score': df['sentiment_score'].mean(),
+        'pos_count': len(pos_df),
+        'neg_count': len(neg_df),
+        'neu_count': total - len(pos_df) - len(neg_df),
+        'pos_posts': pos_df.head(10).to_dict('records'),
+        'neg_posts': neg_df.head(10).to_dict('records')
+    }
 
 @app.route('/')
 def index():
