@@ -1,15 +1,17 @@
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from db_manager import DBManager
+
+# 한국 시간대 (UTC+9)
+KST = timezone(timedelta(hours=9))
 
 class ReportGenerator:
     """
     분석된 데이터를 바탕으로 프리미엄 HTML 리포트와 마크다운 요약을 생성하는 클래스입니다.
     연결된 파일: db_manager.py, main.py
     """
-    def __init__(self, db_name="dc_sentiment.db", output_dir="reports"):
-        self.db_name = db_name
+    def __init__(self, output_dir="reports"):
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -19,13 +21,13 @@ class ReportGenerator:
         특정 기간(days)의 여론 지표 리포트를 생성합니다.
         """
         db = DBManager()
-        target_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        target_date = (datetime.now(KST) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
         
         try:
             response = db.client.table('posts').select('title, date_standard, sentiment_score, writer, views, recommend') \
                 .eq('gallery_id', gallery_id) \
                 .gte('date_standard', target_date) \
-                .order('date_standard', desc=True).execute()
+                .order('date_standard', desc=True).limit(5000).execute()
                 
             if hasattr(response, 'data') and response.data:
                 df = pd.DataFrame(response.data)
@@ -50,7 +52,7 @@ class ReportGenerator:
         neu_count = total_count - pos_count - neg_count
 
         # 3. HTML 리포트 생성
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
         html_content = f"""
         <!DOCTYPE html>
         <html lang="ko">
@@ -168,7 +170,7 @@ class ReportGenerator:
         """
 
         # 파일명에 갤러리ID와 기간 포함
-        file_name = f"report_{gallery_id}_{days}d_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        file_name = f"report_{gallery_id}_{days}d_{datetime.now(KST).strftime('%Y%m%d_%H%M%S')}.html"
         file_path = os.path.join(self.output_dir, file_name)
 
         with open(file_path, 'w', encoding='utf-8') as f:

@@ -10,7 +10,7 @@ KST = timezone(timedelta(hours=9))
 
 app = Flask(__name__)
 
-def get_sentiment_data(gallery_id, days):
+def get_sentiment_data(gallery_id, days, is_minor=True):
     """DB에서 데이터를 가져와 분석에 필요한 형태로 반환합니다."""
     db = DBManager()
     target_date = (datetime.now(KST) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
@@ -23,6 +23,7 @@ def get_sentiment_data(gallery_id, days):
             .eq('gallery_id', gallery_id) \
             .gte('date_standard', target_date) \
             .order('date_standard', desc=True) \
+            .limit(5000) \
             .execute()
             
         if hasattr(response, 'data') and response.data:
@@ -45,6 +46,7 @@ def get_sentiment_data(gallery_id, days):
 
     return {
         'gallery_id': gallery_id,
+        'is_minor': is_minor,
         'days': days,
         'total_count': total,
         'avg_score': df['sentiment_score'].mean(),
@@ -67,7 +69,11 @@ def index():
     if not is_valid:
         gallery_id = default_gallery
         
-    data = get_sentiment_data(gallery_id, days)
+    # 현재 갤러리의 is_minor 플래그 조회
+    current_gallery = next((g for g in TARGET_GALLERIES if g['id'] == gallery_id), None)
+    is_minor = current_gallery['is_minor'] if current_gallery else True
+
+    data = get_sentiment_data(gallery_id, days, is_minor=is_minor)
     
     # 디버깅 문자열인 경우 바로 화면에 에러를 띄웁니다.
     if isinstance(data, str) and data.startswith('ERROR'):

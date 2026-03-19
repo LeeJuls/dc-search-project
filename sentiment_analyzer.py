@@ -94,23 +94,30 @@ class SentimentAnalyzer:
             print(f"로컬 감성 사전 로드 오류: {e}")
         return {}
 
-    def update_lexicon_with_llm(self, sample_titles):
+    def update_lexicon_with_llm(self, sample_titles, gallery_name="게임"):
         """
         OpenRouter AI를 통해 신조어 및 문맥별 감성 점수를 추출하여 사전을 업데이트합니다.
+        gallery_name: 갤러리 이름 (프롬프트에 동적 반영)
         """
         if not sample_titles:
             return
 
         titles_str = "\n".join(sample_titles)
         prompt = f"""
-        당신은 한국 게임 커뮤니티(디시인사이드) 전문가입니다. 
-        다음은 최근 '쿠키런 오븐스매시' 갤러리의 게시글 제목들입니다.
+        당신은 한국 게임 커뮤니티(디시인사이드) 전문가입니다.
+        다음은 최근 '{gallery_name}' 갤러리의 게시글 제목들입니다.
         이 제목들을 분석해서 요즘 유저들이 사용하는 '신조어'나 '핵심 키워드' 중 여론(긍정/부정)을 파악할 수 있는 단어들을 20개 정도 골라내주세요.
         각 단어에 대해 긍정은 양수(최대 1.0), 부정은 음수(최소 -1.0)로 점수를 매겨 JSON 형식으로만 응답하세요.
-        
+
+        [중요 가이드라인]
+        - 욕설(씨발, 개 등)은 감성 판단에 사용하지 마세요. 한국 커뮤니티에서 욕설은 강조 표현이지 부정/긍정 지표가 아닙니다.
+        - "사기캐", "개강", "밸붕" 등 오버밸런스 관련 단어는 부정(-0.6 ~ -0.7)으로 분류하세요. 게임 밸런스 불만입니다.
+        - "안뜨", "안나옴", "조각만", "못뽑" 등 가챠/드랍 불만은 부정(-0.5 ~ -0.7)입니다.
+        - "갓겜", "꿀잼", "혜자" 등 게임성/운영 칭찬은 긍정(0.7 ~ 0.9)입니다.
+
         [게시글 제목]
         {titles_str}
-        
+
         주의: 순수하게 JSON 객체 하나만 {{"단어": 점수}} 형태로 반환하세요.
         """
 
@@ -178,7 +185,7 @@ class SentimentAnalyzer:
             if not force:
                 query = query.is_('analyzed_at', 'null')
             
-            response = query.execute()
+            response = query.limit(5000).execute()
             if not hasattr(response, 'data') or not response.data:
                 return 0
                 

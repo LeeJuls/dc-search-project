@@ -1,9 +1,12 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import time
 import random
+
+# 한국 시간대 (UTC+9)
+KST = timezone(timedelta(hours=9))
 
 def get_standard_date(date_str):
     """
@@ -13,10 +16,10 @@ def get_standard_date(date_str):
     - YY.MM.DD 또는 YY/MM/DD (과거 연도)
     - YYYY-MM-DD HH:mm:ss (이미 완성된 형식)
     """
-    if not date_str: return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if not date_str: return datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
     
     date_str = date_str.strip()
-    now = datetime.now()
+    now = datetime.now(KST)
     
     # 1. 이미 완성된 형태 (YYYY-MM-DD HH:mm:ss)
     try:

@@ -2,9 +2,13 @@ from dc_crawler import crawl_dc_gallery
 from db_manager import DBManager
 from sentiment_analyzer import SentimentAnalyzer
 from report_generator import ReportGenerator
-from datetime import datetime, timedelta
+from config import TARGET_GALLERIES
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import os
+
+# 한국 시간대 (UTC+9)
+KST = timezone(timedelta(hours=9))
 
 def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True):
     """
@@ -22,7 +26,7 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True):
     print(f"\n--- '{gallery_id}' ({'마이너' if is_minor else '메이저'}) 갤러리 프로젝트 가동 ---")
     
     # 1. 수집 단계
-    target_date = datetime.now() - timedelta(days=days_ago)
+    target_date = datetime.now(KST) - timedelta(days=days_ago)
     all_new_posts = []
     page = 1
     continue_crawling = True
@@ -72,7 +76,10 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True):
         if hasattr(response, 'data') and response.data:
             sample_df = pd.DataFrame(response.data)
             if not sample_df.empty:
-                analyzer.update_lexicon_with_llm(sample_df['title'].tolist())
+                # config에서 갤러리 한글 이름 조회 (동적 프롬프트용)
+                gallery_info = next((g for g in TARGET_GALLERIES if g['id'] == gallery_id), None)
+                gallery_name = gallery_info['name'] if gallery_info else gallery_id
+                analyzer.update_lexicon_with_llm(sample_df['title'].tolist(), gallery_name=gallery_name)
     except Exception as e:
         print(f"Supabase 샘플 데이터 호출 에러: {e}")
 

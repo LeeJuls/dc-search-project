@@ -397,7 +397,7 @@
             <div class="list-section list-pos">
                 <h2>👍 긍정 대표글 Top 10 (공감순)</h2>
                 {% for post in data.pos_posts %}
-                <a href="https://gall.dcinside.com/board/view/?id={{ data.gallery_id }}&no={{ post.post_num }}" class="post-card" target="_blank">
+                <a href="https://gall.dcinside.com/{{ 'mgallery/board/view/' if data.is_minor else 'board/view/' }}?id={{ data.gallery_id }}&no={{ post.post_num }}" class="post-card" target="_blank">
                     <span class="post-title">{{ post.title }} <span style="color: #64748b; font-weight: normal;">[{{ post.engagement_score }}]</span></span>
                     <span class="post-score score-p">+{{ post.sentiment_score | round(2) }}</span>
                 </a>
@@ -407,7 +407,7 @@
             <div class="list-section list-neg">
                 <h2>👎 부정 대표글 Top 10 (공감순)</h2>
                 {% for post in data.neg_posts %}
-                <a href="https://gall.dcinside.com/board/view/?id={{ data.gallery_id }}&no={{ post.post_num }}" class="post-card" target="_blank">
+                <a href="https://gall.dcinside.com/{{ 'mgallery/board/view/' if data.is_minor else 'board/view/' }}?id={{ data.gallery_id }}&no={{ post.post_num }}" class="post-card" target="_blank">
                     <span class="post-title">{{ post.title }} <span style="color: #64748b; font-weight: normal;">[{{ post.engagement_score }}]</span></span>
                     <span class="post-score score-n">{{ post.sentiment_score | round(2) }}</span>
                 </a>
