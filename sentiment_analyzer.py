@@ -41,6 +41,7 @@ class SentimentAnalyzer:
             # ── 운영 및 BM ─ 긍정 ──────────────────────────────────
             "혜자": 0.8, "갓운영": 0.8, "사료": 0.6,
             "퍼준다": 0.7, "합리적": 0.5, "갓패치": 0.7,
+            "무과금": 0.5,  # "과금"(-0.4) 오매칭 상쇄용 + 의미 자체도 긍정
 
             # ── 운영 및 BM ─ 부정 ──────────────────────────────────
             "창렬": -0.8, "돈독": -0.7, "불통": -0.7, "먹튀": -0.8,
@@ -143,15 +144,31 @@ class SentimentAnalyzer:
             print(f"LLM 사전 업데이트 오류: {e}")
 
     def analyze_locally(self, text):
-        """로컬 사전을 사용하여 텍스트의 감성 스코어를 계산합니다."""
+        """로컬 사전을 사용하여 텍스트의 감성 스코어를 계산합니다.
+
+        긴 키워드 우선 매칭: '무과금'이 매칭되면 내부의 '과금'은 건너뜁니다.
+        """
         score = 0.0
         count = 0
-        
-        for word, s in self.lexicon.items():
-            if word in text:
-                score += s
-                count += 1
-        
+        matched_positions = set()  # 이미 매칭된 문자 위치 추적
+
+        # 긴 키워드부터 먼저 매칭 (길이 내림차순 정렬)
+        sorted_lexicon = sorted(self.lexicon.items(), key=lambda x: len(x[0]), reverse=True)
+
+        for word, s in sorted_lexicon:
+            start = 0
+            while True:
+                idx = text.find(word, start)
+                if idx == -1:
+                    break
+                positions = set(range(idx, idx + len(word)))
+                # 이미 더 긴 키워드가 커버한 위치면 건너뜀
+                if not positions & matched_positions:
+                    score += s
+                    count += 1
+                    matched_positions |= positions
+                start = idx + 1
+
         return score / count if count > 0 else 0.0
 
     def process_all_unbound_posts(self, force=False):
