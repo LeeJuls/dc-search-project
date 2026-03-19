@@ -189,19 +189,16 @@ class SentimentAnalyzer:
             if not hasattr(response, 'data') or not response.data:
                 return 0
                 
-            updates = []
+            count = 0
             for row in response.data:
                 score = self.analyze_locally(row['title'])
-                updates.append({
-                    'id': row['id'], 
-                    'sentiment_score': score, 
+                self.db.client.table('posts').update({
+                    'sentiment_score': score,
                     'analyzed_at': datetime.now().isoformat()
-                })
+                }).eq('id', row['id']).execute()
+                count += 1
             
-            if updates:
-                self.db.client.table('posts').upsert(updates).execute()
-            
-            return len(updates)
+            return count
         except Exception as e:
             print(f"게시글 감성 분석 처리 중 오류: {e}")
             return 0
