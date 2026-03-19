@@ -18,14 +18,12 @@
    - `SUPABASE_URL`: 본인의 Supabase URL
    - `SUPABASE_KEY`: 본인의 Supabase Anon Key
 
-## 3. Render에서 수집 봇(Background Worker) 생성
-1. Render 대시보드(New +) ➔ **Background Worker** 클릭
-2. 위와 똑같이 Github 레포지토리 연결
-3. **Environment**: `Python 3`
-4. **Build Command**: `pip install -r requirements.txt`
-5. **Start Command**: `python scheduler.py`
-6. **Environment Variables**:
-   - `SUPABASE_URL`, `SUPABASE_KEY`
-   - `OPENROUTER_API_KEY`: 본인의 AI 분석 API 키
+## 3. Github Actions에서 무상 수집 봇 생성
+1. 깃허브 프로젝트의 **Settings** ➔ **Secrets and variables** ➔ **Actions** 로 이동합니다.
+2. **New repository secret** 버튼을 눌러 다음 3개의 키를 각각 기입합니다.
+   - `SUPABASE_URL`
+   - `SUPABASE_KEY`
+   - `OPENROUTER_API_KEY`
+3. 코드가 푸시되면 미리 작성된 `.github/workflows/scraper.yml`에 의해 매 30분마다 깃허브 로봇이 켜져 데이터를 수집하고 백그라운드 구동을 자동 종료합니다.
 
-> **참고:** Web Service와 Background Worker가 완벽히 독립되어 돌아가므로, 스케줄러가 터지거나 크롤링 에러가 나더라도 사용자의 웹페이지(Web Service)는 0.1초의 로딩 지연 없이 안전하게 유지보수됩니다.
+> **참고:** Web Service와 Github Actions 봇이 서버 클라우드 단위로 완전히 독립되어 돌아가므로, 스케줄러가 터지거나 크롤링 에러가 나더라도 사용자의 웹페이지(Render 웹사이트)는 0.1초의 로딩 지연 없이 안전하게 유지보수되며 100% 무상 운영이 달성됩니다.
