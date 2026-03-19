@@ -339,7 +339,9 @@
         <div class="header-section">
             <div class="gallery-info">
                 {% set current = target_galleries | selectattr("id", "equalto", gallery_id) | list %}
-                <h1>{{ current[0].name if current else gallery_id }} 갤러리</h1>
+                <h1>{{ current[0].name if current else gallery_id }} 갤러리
+                    <a href="https://gall.dcinside.com/{{ 'mgallery/board/lists/' if current and current[0].is_minor else 'board/lists/' }}?id={{ gallery_id }}" target="_blank" title="갤러리 바로가기" style="font-size: 0.5em; vertical-align: middle; text-decoration: none; color: var(--primary); margin-left: 0.3em;">&#x1F517;</a>
+                </h1>
                 <p>분석 범위: 최근 <strong>{{ days }}일</strong> 동안의 여론</p>
             </div>
             <div class="toggle-group">

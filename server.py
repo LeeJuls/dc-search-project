@@ -2,15 +2,18 @@ from flask import Flask, render_template, request, redirect, url_for
 from config import TARGET_GALLERIES
 from db_manager import DBManager
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
+
+# 한국 시간대 (UTC+9)
+KST = timezone(timedelta(hours=9))
 
 app = Flask(__name__)
 
 def get_sentiment_data(gallery_id, days):
     """DB에서 데이터를 가져와 분석에 필요한 형태로 반환합니다."""
     db = DBManager()
-    target_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    target_date = (datetime.now(KST) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
     
     try:
         if not db.client:
