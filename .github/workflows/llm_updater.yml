@@ -1,18 +1,18 @@
-name: 🕵️ DC Search Data Scraper
+name: 🤖 LLM Lexicon Updater
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
-  scrape-and-analyze:
+  update-lexicon:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-      
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -24,11 +24,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run Scraper
+    - name: Run LLM Lexicon Update
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        SKIP_LLM: 'true'
+        LLM_ONLY: 'true'
       run: |
         python -c "from scheduler import process_galleries; process_galleries()"

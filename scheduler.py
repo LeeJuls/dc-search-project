@@ -1,4 +1,5 @@
 import time
+import os
 from datetime import datetime
 from config import TARGET_GALLERIES
 from main import run_daily_process
@@ -6,16 +7,22 @@ import traceback
 
 def process_galleries():
     """정의된 모든 갤러리를 순회하며 수집 및 분석을 실행합니다."""
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 스케줄러 데이터 수집 사이클 시작")
-    
+    # 환경변수로 실행 모드 제어
+    skip_llm = os.environ.get('SKIP_LLM', '').lower() == 'true'
+    llm_only = os.environ.get('LLM_ONLY', '').lower() == 'true'
+
+    mode_label = '[크롤링 전용]' if skip_llm else '[LLM 전용]' if llm_only else '[전체]'
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 스케줄러 데이터 수집 사이클 시작 {mode_label}")
+
     for gallery in TARGET_GALLERIES:
         try:
             print(f"\n=======================================================")
             print(f"타겟 갤러리 수집 시작: {gallery['name']} ({gallery['id']})")
             print(f"=======================================================")
-            
+
             # 메인 분석 프로세스 호출
-            run_daily_process(gallery_id=gallery['id'], days_ago=7, is_minor=gallery['is_minor'])
+            run_daily_process(gallery_id=gallery['id'], days_ago=7, is_minor=gallery['is_minor'],
+                              skip_llm=skip_llm, llm_only=llm_only)
             
             print(f"--> 타겟 갤러리 완료: {gallery['name']}")
         except Exception as e:
