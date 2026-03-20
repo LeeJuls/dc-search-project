@@ -34,7 +34,7 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True,
     if llm_only:
         print(">> [크롤링 건너뜀] llm_only 모드")
     else:
-        target_date = datetime.now(KST) - timedelta(days=days_ago)
+        target_date = (datetime.now(KST) - timedelta(days=days_ago)).replace(tzinfo=None)
         all_new_posts = []
         page = 1
         continue_crawling = True
