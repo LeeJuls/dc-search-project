@@ -21,7 +21,9 @@ class ReportGenerator:
         특정 기간(days)의 여론 지표 리포트를 생성합니다.
         """
         db = DBManager()
-        target_date = (datetime.now(KST) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        target_date = (datetime.now(KST) - timedelta(days=days)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).isoformat()
         
         try:
             response = db.client.table('posts').select('title, date_standard, sentiment_score, writer, views, recommend') \
