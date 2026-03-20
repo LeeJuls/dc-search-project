@@ -15,7 +15,7 @@ def get_sentiment_data(gallery_id, days, is_minor=True):
     db = DBManager()
     target_date = (datetime.now(KST) - timedelta(days=days)).replace(
         hour=0, minute=0, second=0, microsecond=0
-    ).isoformat()
+    ).strftime('%Y-%m-%d %H:%M:%S')
     
     try:
         if not db.client:

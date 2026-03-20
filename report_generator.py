@@ -23,7 +23,7 @@ class ReportGenerator:
         db = DBManager()
         target_date = (datetime.now(KST) - timedelta(days=days)).replace(
             hour=0, minute=0, second=0, microsecond=0
-        ).isoformat()
+        ).strftime('%Y-%m-%d %H:%M:%S')
         
         try:
             response = db.client.table('posts').select('title, date_standard, sentiment_score, writer, views, recommend') \
