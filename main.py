@@ -26,9 +26,9 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True,
     
     print(f"\n--- '{gallery_id}' ({'마이너' if is_minor else '메이저'}) 갤러리 프로젝트 가동 ---")
     if skip_llm:
-        print("   [모드: 크롤링 전용 — LLM 사전 업데이트 건너뜀]")
+        print("   [모드: 크롤링 전용 -LLM 사전 업데이트 건너뜀]")
     if llm_only:
-        print("   [모드: LLM 전용 — 크롤링 건너뜀]")
+        print("   [모드: LLM 전용 -크롤링 건너뜀]")
 
     # 1. 수집 단계 (llm_only 시 건너뜀)
     if llm_only:
