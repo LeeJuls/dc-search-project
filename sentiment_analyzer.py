@@ -74,6 +74,15 @@ class SentimentAnalyzer:
             "삭제": -0.7, "토나와": -0.8, "쓰레기": -0.9,
             "혐": -0.8, "별로": -0.4, "그닥": -0.3,
             "실망": -0.5, "병맛": -0.3,
+
+            # ── 복합 부정 표현 (부정어+긍정어 조합) ─────────────────
+            # window 처리로 잡히지 않는 붙여쓰기 패턴 보완
+            "재미없다": -0.7, "재미없어": -0.6, "재미없네": -0.6,
+            "재미없음": -0.6, "재미없는": -0.6,
+            "기대안됨": -0.6, "기대가안됨": -0.6,
+            "기대없다": -0.5, "기대없어": -0.5,
+            "안재밌다": -0.7, "안재밌어": -0.6, "안재밌네": -0.6,
+            "못즐기": -0.5, "못하겠다": -0.5,
         }
         
         data = []
@@ -114,6 +123,8 @@ class SentimentAnalyzer:
         - "사기캐", "개강", "밸붕" 등 오버밸런스 관련 단어는 부정(-0.6 ~ -0.7)으로 분류하세요. 게임 밸런스 불만입니다.
         - "안뜨", "안나옴", "조각만", "못뽑" 등 가챠/드랍 불만은 부정(-0.5 ~ -0.7)입니다.
         - "갓겜", "꿀잼", "혜자" 등 게임성/운영 칭찬은 긍정(0.7 ~ 0.9)입니다.
+        - "안 + 긍정어" 또는 "못 + 긍정어" 조합("안재밌다", "기대가 안됨", "못즐기겠다" 등)은 반드시 부정(-0.5 ~ -0.7)으로 분류하세요.
+        - "재미없다", "재미없어", "기대없다" 등 '없다'가 붙는 부정 복합어도 부정(-0.5 ~ -0.7)으로 분류하세요.
 
         [게시글 제목]
         {titles_str}
@@ -150,10 +161,16 @@ class SentimentAnalyzer:
         except Exception as e:
             print(f"LLM 사전 업데이트 오류: {e}")
 
+    # 키워드 앞뒤 window에서 감성 점수를 반전시키는 부정어 목록
+    NEGATION_WORDS = ["안되", "안됨", "안 되", "못되", "안하", "못하", "안해", "못해",
+                      "없다", "없어", "없네", "없음", "없는", "없고",
+                      "안 ", "못 ", "않", "안되네", "안되는", "안됩"]
+
     def analyze_locally(self, text):
         """로컬 사전을 사용하여 텍스트의 감성 스코어를 계산합니다.
 
         긴 키워드 우선 매칭: '무과금'이 매칭되면 내부의 '과금'은 건너뜁니다.
+        부정어 window: 키워드 앞 6글자 또는 뒤 6글자 내에 부정어가 있으면 점수를 반전합니다.
         """
         score = 0.0
         count = 0
@@ -171,7 +188,17 @@ class SentimentAnalyzer:
                 positions = set(range(idx, idx + len(word)))
                 # 이미 더 긴 키워드가 커버한 위치면 건너뜀
                 if not positions & matched_positions:
-                    score += s
+                    word_end = idx + len(word)
+                    # 키워드 앞 6글자 window
+                    preceding = text[max(0, idx - 6):idx]
+                    # 키워드 뒤 6글자 window (조사 포함 "가 안되네" 패턴 처리)
+                    following = text[word_end:word_end + 6]
+                    is_negated = (
+                        any(neg in preceding for neg in self.NEGATION_WORDS)
+                        or any(neg in following for neg in self.NEGATION_WORDS)
+                    )
+                    actual_score = -s if is_negated else s
+                    score += actual_score
                     count += 1
                     matched_positions |= positions
                 start = idx + 1
