@@ -79,6 +79,7 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True,
             print(f">> [{gallery_id}] 새로 수집된 게시글이 없습니다.")
 
     # 2. AI 학습 단계 (skip_llm 시 건너뜀)
+    lexicon_changed = False
     if skip_llm:
         print(">> [LLM 건너뜀] skip_llm 모드")
     else:
@@ -87,15 +88,15 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True,
             if hasattr(response, 'data') and response.data:
                 sample_df = pd.DataFrame(response.data)
                 if not sample_df.empty:
-                    # config에서 갤러리 한글 이름 조회 (동적 프롬프트용)
                     gallery_info = next((g for g in TARGET_GALLERIES if g['id'] == gallery_id), None)
                     gallery_name = gallery_info['name'] if gallery_info else gallery_id
-                    analyzer.update_lexicon_with_llm(sample_df['title'].tolist(), gallery_name=gallery_name)
+                    lexicon_changed = analyzer.update_lexicon_with_llm(sample_df['title'].tolist(), gallery_name=gallery_name) or False
         except Exception as e:
             print(f"Supabase 샘플 데이터 호출 에러: {e}")
 
-    # 3. 로컬 분석 단계
-    analyzed_count = analyzer.process_all_unbound_posts(force=True)
+    # 3. 로컬 분석 단계 (lexicon 변경 또는 llm_only 모드일 때만 전체 재분석)
+    force_reanalyze = lexicon_changed or llm_only
+    analyzed_count = analyzer.process_all_unbound_posts(force=force_reanalyze)
     print(f">> 분석 완료: {analyzed_count}개의 게시글 분석됨")
 
     # 4. 리포트 생성 단계

@@ -24,7 +24,14 @@ class SentimentAnalyzer:
         self.lexicon = self._load_lexicon()
 
     def _init_default_lexicon(self):
-        """기본적인 감성 단어들을 DB에 미리 넣어둡니다 (API 실패 대비)."""
+        """기본적인 감성 단어들을 DB에 미리 넣어둡니다 (API 실패 대비). 이미 데이터가 있으면 건너뜀."""
+        try:
+            resp = self.db.client.table('lexicon').select('word', count='exact').limit(1).execute()
+            if resp.count and resp.count > 0:
+                return  # 이미 초기화됨
+        except:
+            pass
+
         default_words = {
             # ── 게임성 및 재미 ─ 긍정 ──────────────────────────────
             "갓겜": 0.9, "꿀잼": 0.8, "인생겜": 0.9, "대박": 0.8,
@@ -109,7 +116,7 @@ class SentimentAnalyzer:
         gallery_name: 갤러리 이름 (프롬프트에 동적 반영)
         """
         if not sample_titles:
-            return
+            return False
 
         titles_str = "\n".join(sample_titles)
         prompt = f"""
@@ -132,34 +139,40 @@ class SentimentAnalyzer:
         주의: 순수하게 JSON 객체 하나만 {{"단어": 점수}} 형태로 반환하세요.
         """
 
+        old_lexicon = dict(self.lexicon)
+
         try:
             print("AI에게 최신 여론 및 신조어 학습 중 (OpenRouter)...")
-            # OpenRouter 무료 모델 재시도
             response = self.client.chat.completions.create(
                 model="meta-llama/llama-3.2-3b-instruct:free",
                 messages=[{"role": "user", "content": prompt}]
             )
-            
+
             content = response.choices[0].message.content
             if "{" in content:
                 content = content[content.find("{"):content.rfind("}")+1]
-                
+
             new_lexicon = json.loads(content)
-            
+
             data = []
             for word, score in new_lexicon.items():
                 data.append({"word": word, "score": score, "updated_at": datetime.now().isoformat()})
-            
+
             try:
                 self.db.client.table('lexicon').upsert(data, on_conflict='word').execute()
             except Exception as e:
                 print(f"LLM 신조어 DB 반영 오류: {e}")
-            
+                return False
+
             print(f"새로운 단어 {len(new_lexicon)}개가 사전에 반영되었습니다.")
             self.lexicon = self._load_lexicon()
-            
+            changed = (old_lexicon != self.lexicon)
+            print(f">> lexicon 변경 여부: {changed}")
+            return changed
+
         except Exception as e:
             print(f"LLM 사전 업데이트 오류: {e}")
+            return False
 
     # 키워드 앞뒤 window에서 감성 점수를 반전시키는 부정어 목록
     NEGATION_WORDS = ["안되", "안됨", "안 되", "못되", "안하", "못하", "안해", "못해",
