@@ -206,26 +206,41 @@ class SentimentAnalyzer:
         return score / count if count > 0 else 0.0
 
     def process_all_unbound_posts(self, force=False):
-        """아직 분석되지 않은 게시글을 분석합니다."""
+        """아직 분석되지 않은 게시글을 분석합니다. 1000개 단위 페이지네이션."""
+        FETCH_SIZE = 1000
+        UPSERT_SIZE = 200
+        total_count = 0
+        offset = 0
+
         try:
-            query = self.db.client.table('posts').select('id, title')
-            if not force:
-                query = query.is_('analyzed_at', 'null')
-            
-            response = query.limit(5000).execute()
-            if not hasattr(response, 'data') or not response.data:
-                return 0
-                
-            count = 0
-            for row in response.data:
-                score = self.analyze_locally(row['title'])
-                self.db.client.table('posts').update({
-                    'sentiment_score': score,
-                    'analyzed_at': datetime.now().isoformat()
-                }).eq('id', row['id']).execute()
-                count += 1
-            
-            return count
+            while True:
+                query = self.db.client.table('posts').select('id, title')
+                if not force:
+                    query = query.is_('analyzed_at', 'null')
+
+                response = query.order('id').range(offset, offset + FETCH_SIZE - 1).execute()
+                if not hasattr(response, 'data') or not response.data:
+                    break
+
+                now = datetime.now().isoformat()
+                for idx, row in enumerate(response.data):
+                    score = self.analyze_locally(row['title'])
+                    self.db.client.table('posts').update({
+                        'sentiment_score': score,
+                        'analyzed_at': now
+                    }).eq('id', row['id']).execute()
+                    if (idx + 1) % 100 == 0:
+                        print(f"   {idx + 1}/{len(response.data)} 처리중...", flush=True)
+
+                batch_count = len(response.data)
+                total_count += batch_count
+                offset += batch_count
+                print(f">> 배치 완료: {batch_count}개 처리 (누적: {total_count}개)", flush=True)
+
+                if batch_count < FETCH_SIZE:
+                    break
+
+            return total_count
         except Exception as e:
             print(f"게시글 감성 분석 처리 중 오류: {e}")
-            return 0
+            return total_count
