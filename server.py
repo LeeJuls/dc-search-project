@@ -64,7 +64,10 @@ def index():
     # 기본값은 config.py에 정의된 첫 번째 갤러리
     default_gallery = TARGET_GALLERIES[0]['id']
     gallery_id = request.args.get('gallery', default_gallery)
-    days = int(request.args.get('days', 7))
+    try:
+        days = int(request.args.get('days', 7))
+    except (ValueError, TypeError):
+        days = 7
     
     # 쿼리 파라미터 유효성 검사
     is_valid = any(g['id'] == gallery_id for g in TARGET_GALLERIES)
