@@ -219,9 +219,9 @@ class SentimentAnalyzer:
         return score / count if count > 0 else 0.0
 
     def process_all_unbound_posts(self, force=False):
-        """아직 분석되지 않은 게시글을 분석합니다. 1000개 단위 페이지네이션."""
+        """게시글 감성 분석. RPC 벌크 업데이트 사용 (폴백: 개별 update + 쿨다운)."""
         FETCH_SIZE = 1000
-        UPSERT_SIZE = 200
+        RPC_BATCH = 500
         total_count = 0
         offset = 0
 
@@ -235,15 +235,26 @@ class SentimentAnalyzer:
                 if not hasattr(response, 'data') or not response.data:
                     break
 
-                now = datetime.now().isoformat()
-                for idx, row in enumerate(response.data):
+                # 로컬에서 점수 계산 (API 호출 없음)
+                ids = []
+                scores = []
+                for row in response.data:
                     score = self.analyze_locally(row['title'])
-                    self.db.client.table('posts').update({
-                        'sentiment_score': score,
-                        'analyzed_at': now
-                    }).eq('id', row['id']).execute()
-                    if (idx + 1) % 100 == 0:
-                        print(f"   {idx + 1}/{len(response.data)} 처리중...", flush=True)
+                    ids.append(row['id'])
+                    scores.append(score)
+
+                # RPC로 벌크 업데이트 (500개씩)
+                for i in range(0, len(ids), RPC_BATCH):
+                    batch_ids = ids[i:i + RPC_BATCH]
+                    batch_scores = scores[i:i + RPC_BATCH]
+                    try:
+                        self.db.client.rpc('bulk_update_sentiment', {
+                            'ids': batch_ids,
+                            'scores': batch_scores
+                        }).execute()
+                    except Exception as rpc_err:
+                        print(f">> RPC 실패, 개별 업데이트 폴백: {rpc_err}")
+                        self._fallback_individual_update(batch_ids, batch_scores)
 
                 batch_count = len(response.data)
                 total_count += batch_count
@@ -257,3 +268,26 @@ class SentimentAnalyzer:
         except Exception as e:
             print(f"게시글 감성 분석 처리 중 오류: {e}")
             return total_count
+
+    def _fallback_individual_update(self, ids, scores):
+        """RPC 실패 시 개별 update + 쿨다운 폴백."""
+        import time
+        now = datetime.now().isoformat()
+        for i, (pid, score) in enumerate(zip(ids, scores)):
+            try:
+                self.db.client.table('posts').update({
+                    'sentiment_score': score,
+                    'analyzed_at': now
+                }).eq('id', pid).execute()
+            except Exception:
+                time.sleep(5)
+                try:
+                    self.db.client.table('posts').update({
+                        'sentiment_score': score,
+                        'analyzed_at': now
+                    }).eq('id', pid).execute()
+                except:
+                    pass
+            if (i + 1) % 200 == 0:
+                print(f"   폴백: {i + 1}/{len(ids)} 처리중...", flush=True)
+                time.sleep(5)
