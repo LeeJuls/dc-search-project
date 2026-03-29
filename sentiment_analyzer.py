@@ -21,24 +21,14 @@ class SentimentAnalyzer:
     """
 
     # ── 프로바이더 설정 ──────────────────────────────────────────────
-    # 무료 티어: 모델별 각 20 RPD → 모델 수 × 20 × 15 = 일일 LLM 분석량
+    # 무료 티어 검증 완료 모델만 (모델별 20 RPD, 100개/배치 = 일 8,000개+)
     PROVIDER_CHAIN = [
         {'name': 'gemini_25_flash_lite', 'rpd': 20, 'batch_size': 100,
          'model': 'gemini-2.5-flash-lite', 'type': 'gemini', 'sleep': 4},
         {'name': 'gemini_25_flash', 'rpd': 20, 'batch_size': 100,
          'model': 'gemini-2.5-flash', 'type': 'gemini', 'sleep': 4},
-        {'name': 'gemini_20_flash', 'rpd': 20, 'batch_size': 100,
-         'model': 'gemini-2.0-flash', 'type': 'gemini', 'sleep': 4},
-        {'name': 'gemini_20_flash_lite', 'rpd': 20, 'batch_size': 100,
-         'model': 'gemini-2.0-flash-lite', 'type': 'gemini', 'sleep': 4},
-        {'name': 'gemini_25_pro', 'rpd': 20, 'batch_size': 100,
-         'model': 'gemini-2.5-pro', 'type': 'gemini', 'sleep': 6},
         {'name': 'gemini_3_flash', 'rpd': 20, 'batch_size': 100,
          'model': 'gemini-3-flash-preview', 'type': 'gemini', 'sleep': 4},
-        {'name': 'gemini_3_pro', 'rpd': 20, 'batch_size': 100,
-         'model': 'gemini-3-pro-preview', 'type': 'gemini', 'sleep': 6},
-        {'name': 'gemini_31_pro', 'rpd': 20, 'batch_size': 100,
-         'model': 'gemini-3.1-pro-preview', 'type': 'gemini', 'sleep': 6},
         {'name': 'gemini_31_flash_lite', 'rpd': 20, 'batch_size': 100,
          'model': 'gemini-3.1-flash-lite-preview', 'type': 'gemini', 'sleep': 4},
         {'name': 'openrouter_llama', 'rpd': 50, 'batch_size': 10,
