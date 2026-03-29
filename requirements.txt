@@ -6,3 +6,4 @@ python-dotenv
 flask
 supabase
 gunicorn
+google-genai

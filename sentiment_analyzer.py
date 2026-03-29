@@ -1,26 +1,80 @@
 import os
 import json
+import time
+import re
 from openai import OpenAI
 from dotenv import load_dotenv
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
+from itertools import groupby
 
 # .env 파일 로드
 load_dotenv()
 
+
 class SentimentAnalyzer:
     """
     하이브리드 감성 분석 엔진:
-    1. Daily LLM Tutor: OpenRouter를 통해 신조어 및 문맥 사전 업데이트
-    2. Local Engine: 업데이트된 사전을 바탕으로 전체 글 고속 분석
+    1. LLM 배치 분석: Gemini / OpenRouter를 통해 문맥 기반 감성 분석 (15개씩 배치)
+    2. 로컬 사전 폴백: API 소진 시 개선된 사전 기반 고속 분석
+    3. LLM 사전 업데이트: 신조어 추출 (기존 기능 유지)
     """
+
+    # ── 프로바이더 설정 ──────────────────────────────────────────────
+    PROVIDER_CHAIN = [
+        {
+            'name': 'gemini_flash_lite',
+            'rpd': 1000, 'rpm': 15, 'batch_size': 15,
+            'model': 'gemini-2.5-flash-lite',
+            'type': 'gemini',
+            'sleep': 4,
+        },
+        {
+            'name': 'gemini_flash',
+            'rpd': 250, 'rpm': 10, 'batch_size': 15,
+            'model': 'gemini-2.5-flash',
+            'type': 'gemini',
+            'sleep': 6,
+        },
+        {
+            'name': 'openrouter_llama',
+            'rpd': 50, 'rpm': 10, 'batch_size': 10,
+            'model': 'meta-llama/llama-3.2-3b-instruct:free',
+            'type': 'openrouter',
+            'sleep': 6,
+        },
+    ]
+
     def __init__(self, db_manager):
         self.db = db_manager
+
+        # OpenRouter 클라이언트 (기존)
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY"),
         )
-        self._init_default_lexicon() # 초기 기본 사전 삽입
+
+        # Gemini 클라이언트
+        self.gemini_client = None
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            try:
+                from google import genai as google_genai
+                self.gemini_client = google_genai.Client(api_key=gemini_key)
+                print(">> Gemini API 클라이언트 초기화 완료")
+            except Exception as e:
+                print(f">> Gemini 초기화 실패: {e}")
+
+        # 테스트 모드: LLM 배치 1회만 호출
+        self.test_mode = os.getenv("TEST_MODE", "").lower() == "true"
+        if self.test_mode:
+            print("[TEST_MODE] LLM 배치 1회 제한 적용")
+
+        # 일일 API 사용량 추적 (날짜 변경 시 자동 리셋)
+        self._api_usage = {}
+        self._api_usage_date = date.today()
+
+        self._init_default_lexicon()
         self.lexicon = self._load_lexicon()
 
     def _init_default_lexicon(self):
@@ -28,7 +82,7 @@ class SentimentAnalyzer:
         try:
             resp = self.db.client.table('lexicon').select('word', count='exact').limit(1).execute()
             if resp.count and resp.count > 0:
-                return  # 이미 초기화됨
+                return
         except:
             pass
 
@@ -48,7 +102,7 @@ class SentimentAnalyzer:
             # ── 운영 및 BM ─ 긍정 ──────────────────────────────────
             "혜자": 0.8, "갓운영": 0.8, "사료": 0.6,
             "퍼준다": 0.7, "합리적": 0.5, "갓패치": 0.7,
-            "무과금": 0.5,  # "과금"(-0.4) 오매칭 상쇄용 + 의미 자체도 긍정
+            "무과금": 0.5,
 
             # ── 운영 및 BM ─ 부정 ──────────────────────────────────
             "창렬": -0.8, "돈독": -0.7, "불통": -0.7, "먹튀": -0.8,
@@ -83,15 +137,22 @@ class SentimentAnalyzer:
             "실망": -0.5, "병맛": -0.3,
 
             # ── 복합 부정 표현 (부정어+긍정어 조합) ─────────────────
-            # window 처리로 잡히지 않는 붙여쓰기 패턴 보완
             "재미없다": -0.7, "재미없어": -0.6, "재미없네": -0.6,
             "재미없음": -0.6, "재미없는": -0.6,
             "기대안됨": -0.6, "기대가안됨": -0.6,
             "기대없다": -0.5, "기대없어": -0.5,
             "안재밌다": -0.7, "안재밌어": -0.6, "안재밌네": -0.6,
             "못즐기": -0.5, "못하겠다": -0.5,
+
+            # ── 신규: 문맥 누락 보강 ───────────────────────────────
+            "조잡": -0.7, "조잡하": -0.7, "조잡함": -0.7,
+            "구림": -0.6, "구리다": -0.5, "구린": -0.5,
+            "에바": -0.4, "글쎄": -0.2,
+
+            # ── 공략/가이드 (커뮤니티 기여 = 긍정) ─────────────────
+            "공략": 0.4, "가이드": 0.4, "팁": 0.3, "정리": 0.2,
         }
-        
+
         data = []
         for word, score in default_words.items():
             data.append({"word": word, "score": score, "updated_at": datetime.now().isoformat()})
@@ -174,10 +235,14 @@ class SentimentAnalyzer:
             print(f"LLM 사전 업데이트 오류: {e}")
             return False
 
-    # 키워드 앞뒤 window에서 감성 점수를 반전시키는 부정어 목록
-    NEGATION_WORDS = ["안되", "안됨", "안 되", "못되", "안하", "못하", "안해", "못해",
-                      "없다", "없어", "없네", "없음", "없는", "없고",
-                      "안 ", "못 ", "않", "안되네", "안되는", "안됩"]
+    # ── 부정어 목록 (비판 동사 패턴 추가) ─────────────────────────
+    NEGATION_WORDS = [
+        "안되", "안됨", "안 되", "못되", "안하", "못하", "안해", "못해",
+        "없다", "없어", "없네", "없음", "없는", "없고",
+        "안 ", "못 ", "않", "안되네", "안되는", "안됩",
+        # 비판 동사 → 앞 단어 점수 반전
+        "욕하", "까는", "깐다", "비판",
+    ]
 
     def analyze_locally(self, text):
         """로컬 사전을 사용하여 텍스트의 감성 스코어를 계산합니다.
@@ -187,9 +252,8 @@ class SentimentAnalyzer:
         """
         score = 0.0
         count = 0
-        matched_positions = set()  # 이미 매칭된 문자 위치 추적
+        matched_positions = set()
 
-        # 긴 키워드부터 먼저 매칭 (길이 내림차순 정렬)
         sorted_lexicon = sorted(self.lexicon.items(), key=lambda x: len(x[0]), reverse=True)
 
         for word, s in sorted_lexicon:
@@ -199,12 +263,9 @@ class SentimentAnalyzer:
                 if idx == -1:
                     break
                 positions = set(range(idx, idx + len(word)))
-                # 이미 더 긴 키워드가 커버한 위치면 건너뜀
                 if not positions & matched_positions:
                     word_end = idx + len(word)
-                    # 키워드 앞 6글자 window
                     preceding = text[max(0, idx - 6):idx]
-                    # 키워드 뒤 6글자 window (조사 포함 "가 안되네" 패턴 처리)
                     following = text[word_end:word_end + 6]
                     is_negated = (
                         any(neg in preceding for neg in self.NEGATION_WORDS)
@@ -218,8 +279,216 @@ class SentimentAnalyzer:
 
         return score / count if count > 0 else 0.0
 
+    # ── 멀티 프로바이더 LLM 배치 분석 ────────────────────────────
+
+    def _reset_usage_if_new_day(self):
+        """날짜가 바뀌면 API 사용량 리셋."""
+        today = date.today()
+        if today != self._api_usage_date:
+            self._api_usage = {}
+            self._api_usage_date = today
+
+    def _get_usage(self, provider_name):
+        """특정 프로바이더의 오늘 사용 횟수 반환."""
+        self._reset_usage_if_new_day()
+        return self._api_usage.get(provider_name, 0)
+
+    def _increment_usage(self, provider_name):
+        """프로바이더 사용 횟수 증가."""
+        self._api_usage[provider_name] = self._api_usage.get(provider_name, 0) + 1
+
+    def _get_available_provider(self):
+        """일일 한도가 남은 최우선 프로바이더 반환. 없으면 None."""
+        self._reset_usage_if_new_day()
+        for provider in self.PROVIDER_CHAIN:
+            # Gemini 클라이언트 없으면 건너뜀
+            if provider['type'] == 'gemini' and not self.gemini_client:
+                continue
+            used = self._get_usage(provider['name'])
+            if used < provider['rpd']:
+                return provider
+        return None
+
+    def _build_sentiment_prompt(self, posts, gallery_name):
+        """문맥 인식 감성 분석 프롬프트를 생성합니다."""
+        lines = []
+        for p in posts:
+            lines.append(f"(id:{p['id']}) {p['title']}")
+        posts_str = "\n".join(lines)
+
+        return f"""당신은 한국 게임 커뮤니티(디시인사이드) 감성 분석 전문가입니다.
+다음은 '{gallery_name}' 갤러리의 게시글 제목들입니다.
+
+[핵심 규칙]
+1. 감성 점수는 이 갤러리의 게임({gallery_name})에 대한 감성만 측정합니다.
+2. 다른 게임을 비하하면서 자기 게임을 칭찬하는 패턴은 긍정입니다.
+   예: "쿠오스하니까 브롤 노잼" → 쿠오스 긍정(+0.5~0.7)
+3. "욕하다", "까다", "비판" 등 비판 동사가 붙으면 부정입니다.
+   예: "최적화 욕하노" → 부정(-0.6)
+4. 사전에 없는 단어도 문맥으로 판단하세요.
+   예: "조잡하다" → 부정(-0.7)
+5. 욕설은 감성 지표가 아닙니다.
+6. 줄임말: 쿠오스=쿠키런 오븐 스매시, 쿠킹덤=쿠키런 킹덤
+7. 복합 감성: "그래픽 좋은데 최적화 구림" → 전체적으로 판단 (부정 -0.3)
+8. 공략/가이드/팁 게시글은 커뮤니티 기여이므로 긍정(+0.3~0.5)입니다.
+   예: "[오븐공략] 뉴비용 가이드" → 긍정(+0.4)
+   예: "초보 팁 정리" → 긍정(+0.3)
+
+[점수 범위]
+-1.0(매우 부정) ~ 0.0(중립) ~ 1.0(매우 긍정)
+
+[게시글 목록]
+{posts_str}
+
+[응답 형식] 반드시 JSON만 출력하세요. 설명이나 마크다운 없이 순수 JSON만:
+{{{{"id숫자": {{"score": 0.0, "target": "분석대상"}}, ...}}}}"""
+
+    def _parse_llm_response(self, content):
+        """LLM 응답에서 JSON을 안전하게 파싱합니다."""
+        if not content:
+            return {}
+
+        # 마크다운 코드블럭 제거
+        content = re.sub(r'```(?:json)?\s*', '', content)
+        content = re.sub(r'```\s*$', '', content)
+        content = content.strip()
+
+        # JSON 추출
+        if "{" in content:
+            content = content[content.find("{"):content.rfind("}") + 1]
+        else:
+            return {}
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            # 쉼표 누락 등 경미한 포맷 오류 보정 시도
+            try:
+                content = re.sub(r'}\s*{', '}, {', content)
+                content = re.sub(r'"\s*\n\s*"', '",\n"', content)
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                return {}
+
+        results = {}
+        for key, val in parsed.items():
+            # id 키에서 숫자만 추출
+            id_str = re.sub(r'[^0-9]', '', str(key))
+            if not id_str:
+                continue
+            post_id = int(id_str)
+
+            if isinstance(val, dict) and 'score' in val:
+                score = float(val['score'])
+            elif isinstance(val, (int, float)):
+                score = float(val)
+            else:
+                continue
+
+            # 점수 범위 클램핑
+            score = max(-1.0, min(1.0, score))
+            results[post_id] = score
+
+        return results
+
+    def _call_llm_batch(self, provider, posts, gallery_name):
+        """프로바이더별 API 호출. Gemini SDK / OpenRouter 분기."""
+        prompt = self._build_sentiment_prompt(posts, gallery_name)
+
+        try:
+            if provider['type'] == 'gemini':
+                response = self.gemini_client.models.generate_content(
+                    model=provider['model'],
+                    contents=prompt,
+                )
+                content = response.text
+            else:
+                # OpenRouter (기존 OpenAI 호환 클라이언트)
+                response = self.client.chat.completions.create(
+                    model=provider['model'],
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                content = response.choices[0].message.content
+
+            self._increment_usage(provider['name'])
+            results = self._parse_llm_response(content)
+
+            matched = len(results)
+            total = len(posts)
+            print(f"   [{provider['name']}] {matched}/{total}개 분석 완료 "
+                  f"(일일: {self._get_usage(provider['name'])}/{provider['rpd']})")
+
+            return results
+
+        except Exception as e:
+            error_msg = str(e)
+            print(f"   [{provider['name']}] API 오류: {error_msg}")
+
+            # 429 (Rate Limit) → 해당 프로바이더 일일 한도 소진 처리
+            if '429' in error_msg or 'rate' in error_msg.lower():
+                self._api_usage[provider['name']] = provider['rpd']
+                print(f"   [{provider['name']}] Rate limit 도달 → 다음 프로바이더로 전환")
+
+            return {}
+
+    def analyze_batch_with_llm(self, posts, gallery_name):
+        """
+        LLM 배치 분석 + 로컬 사전 폴백.
+        posts: [{'id': int, 'title': str}, ...]
+        returns: {post_id: score, ...}
+        """
+        results = {}
+        batch_count = 0
+        max_batches = 1 if self.test_mode else None
+
+        # 현재 프로바이더의 batch_size로 청크 분할
+        i = 0
+        while i < len(posts):
+            if max_batches is not None and batch_count >= max_batches:
+                if self.test_mode:
+                    print(f"   [TEST_MODE] LLM 배치 {max_batches}회 제한 도달, 나머지는 로컬 분석")
+                break
+
+            provider = self._get_available_provider()
+            if not provider:
+                print("   >> 모든 LLM 프로바이더 소진 → 로컬 사전 폴백")
+                break
+
+            batch_size = provider['batch_size']
+            chunk = posts[i:i + batch_size]
+
+            batch_results = self._call_llm_batch(provider, chunk, gallery_name)
+            if batch_results:
+                results.update(batch_results)
+                batch_count += 1
+            else:
+                # 실패한 배치는 카운트하지 않고, 같은 청크를 다음 프로바이더로 재시도
+                continue
+
+            i += batch_size
+
+            # RPM 제한 대응: 호출 간 sleep
+            if i < len(posts):
+                time.sleep(provider['sleep'])
+
+        # LLM 미처리분 → 로컬 사전 분석
+        local_fallback_count = 0
+        for post in posts:
+            if post['id'] not in results:
+                results[post['id']] = self.analyze_locally(post['title'])
+                local_fallback_count += 1
+
+        if local_fallback_count > 0:
+            print(f"   >> 로컬 사전 폴백: {local_fallback_count}개")
+
+        return results
+
+    # ── 메인 처리 ────────────────────────────────────────────────
+
     def process_all_unbound_posts(self, force=False):
-        """게시글 감성 분석. RPC 벌크 업데이트 사용 (폴백: 개별 update + 쿨다운)."""
+        """게시글 감성 분석. LLM 배치 분석 → RPC 벌크 업데이트."""
+        from config import TARGET_GALLERIES
+
         FETCH_SIZE = 1000
         RPC_BATCH = 500
         total_count = 0
@@ -227,7 +496,7 @@ class SentimentAnalyzer:
 
         try:
             while True:
-                query = self.db.client.table('posts').select('id, title')
+                query = self.db.client.table('posts').select('id, title, gallery_id')
                 if not force:
                     query = query.is_('analyzed_at', 'null')
 
@@ -235,13 +504,23 @@ class SentimentAnalyzer:
                 if not hasattr(response, 'data') or not response.data:
                     break
 
-                # 로컬에서 점수 계산 (API 호출 없음)
+                # gallery_id별 그룹핑 → LLM 배치 분석
+                sorted_posts = sorted(response.data, key=lambda x: x['gallery_id'])
                 ids = []
                 scores = []
-                for row in response.data:
-                    score = self.analyze_locally(row['title'])
-                    ids.append(row['id'])
-                    scores.append(score)
+
+                for gallery_id, group_iter in groupby(sorted_posts, key=lambda x: x['gallery_id']):
+                    group = list(group_iter)
+                    gallery_info = next((g for g in TARGET_GALLERIES if g['id'] == gallery_id), None)
+                    gallery_name = gallery_info['name'] if gallery_info else gallery_id
+
+                    print(f">> [{gallery_name}] {len(group)}개 게시글 분석 시작")
+                    batch_results = self.analyze_batch_with_llm(group, gallery_name)
+
+                    for post in group:
+                        score = batch_results.get(post['id'], self.analyze_locally(post['title']))
+                        ids.append(post['id'])
+                        scores.append(score)
 
                 # RPC로 벌크 업데이트 (500개씩)
                 for i in range(0, len(ids), RPC_BATCH):
@@ -271,7 +550,6 @@ class SentimentAnalyzer:
 
     def _fallback_individual_update(self, ids, scores):
         """RPC 실패 시 개별 update + 쿨다운 폴백."""
-        import time
         now = datetime.now().isoformat()
         for i, (pid, score) in enumerate(zip(ids, scores)):
             try:

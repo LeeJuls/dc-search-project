@@ -398,7 +398,13 @@
 
         {% if trend_data %}
         <div class="sentiment-card">
-            <h2 style="font-size:1.3rem; font-weight:800; margin-bottom:1.5rem;">일별 여론 추이 (14일)</h2>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                <h2 style="font-size:1.3rem; font-weight:800; margin:0;">일별 여론 추이 (14일)</h2>
+                <div class="toggle-group">
+                    <a href="#" id="btn-pct" class="active" onclick="switchTrendMode('pct'); return false;">비율</a>
+                    <a href="#" id="btn-cnt" onclick="switchTrendMode('cnt'); return false;">글수</a>
+                </div>
+            </div>
             <div style="position:relative; height:300px;">
                 <canvas id="trendChart"></canvas>
             </div>
@@ -454,28 +460,56 @@
 
     {% if trend_data %}
     <script>
+    var trendData = {{ trend_data | tojson }};
+    var maxPct;
+
+    function switchTrendMode(mode) {
+        var chart = window.trendChart;
+        if (!chart) return;
+        document.getElementById('btn-pct').classList.toggle('active', mode === 'pct');
+        document.getElementById('btn-cnt').classList.toggle('active', mode === 'cnt');
+
+        if (mode === 'cnt') {
+            chart.data.datasets[1].data = trendData.map(function(d) { return d.pos_count; });
+            chart.data.datasets[2].data = trendData.map(function(d) { return d.neg_count; });
+            chart.data.datasets[1].label = '긍정 글수';
+            chart.data.datasets[2].label = '부정 글수';
+            var maxCnt = Math.max.apply(null, trendData.map(function(d) { return Math.max(d.pos_count, d.neg_count); }));
+            chart.options.scales.y1.max = Math.ceil((maxCnt + 0.1) / 5) * 5;
+            chart.options.scales.y1.title.text = '긍정/부정 글수(건)';
+        } else {
+            chart.data.datasets[1].data = trendData.map(function(d) { return d.pos_pct; });
+            chart.data.datasets[2].data = trendData.map(function(d) { return d.neg_pct; });
+            chart.data.datasets[1].label = '긍정 비율(%)';
+            chart.data.datasets[2].label = '부정 비율(%)';
+            chart.options.scales.y1.max = maxPct;
+            chart.options.scales.y1.title.text = '비율(%)';
+        }
+        chart.currentMode = mode;
+        chart.update();
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         if (typeof Chart === 'undefined') return;
 
-        const trendData = {{ trend_data | tojson }};
-        const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-        const labels = trendData.map(function(d) {
-            const dt = new Date(d.stat_date + 'T00:00:00');
-            const mm = String(dt.getMonth() + 1).padStart(2, '0');
-            const dd = String(dt.getDate()).padStart(2, '0');
+        var dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+        var labels = trendData.map(function(d) {
+            var dt = new Date(d.stat_date + 'T00:00:00');
+            var mm = String(dt.getMonth() + 1).padStart(2, '0');
+            var dd = String(dt.getDate()).padStart(2, '0');
             return mm + '/' + dd + '(' + dayNames[dt.getDay()] + ')';
         });
 
-        const allPcts = trendData.map(function(d) { return Math.max(d.pos_pct, d.neg_pct); });
-        const rawMax = Math.max.apply(null, allPcts);
-        const maxPct = Math.min(Math.ceil((rawMax + 0.1) / 5) * 5, 100);
+        var allPcts = trendData.map(function(d) { return Math.max(d.pos_pct, d.neg_pct); });
+        var rawMax = Math.max.apply(null, allPcts);
+        maxPct = Math.min(Math.ceil((rawMax + 0.1) / 5) * 5, 100);
 
-        const style = getComputedStyle(document.documentElement);
-        const primaryColor = style.getPropertyValue('--primary').trim() || '#6366f1';
-        const posColor = style.getPropertyValue('--pos').trim() || '#10b981';
-        const negColor = style.getPropertyValue('--neg').trim() || '#ef4444';
+        var style = getComputedStyle(document.documentElement);
+        var primaryColor = style.getPropertyValue('--primary').trim() || '#6366f1';
+        var posColor = style.getPropertyValue('--pos').trim() || '#10b981';
+        var negColor = style.getPropertyValue('--neg').trim() || '#ef4444';
 
-        new Chart(document.getElementById('trendChart'), {
+        window.trendChart = new Chart(document.getElementById('trendChart'), {
             type: 'bar',
             data: {
                 labels: labels,
@@ -532,7 +566,8 @@
                         callbacks: {
                             label: function(ctx) {
                                 if (ctx.dataset.yAxisID === 'y1') {
-                                    return ctx.dataset.label + ': ' + ctx.parsed.y + '%';
+                                    var suffix = (window.trendChart && window.trendChart.currentMode === 'cnt') ? '건' : '%';
+                                    return ctx.dataset.label + ': ' + ctx.parsed.y + suffix;
                                 }
                                 return ctx.dataset.label + ': ' + ctx.parsed.y + '건';
                             }
@@ -564,6 +599,7 @@
                 }
             }
         });
+        window.trendChart.currentMode = 'pct';
     });
     </script>
     {% endif %}
