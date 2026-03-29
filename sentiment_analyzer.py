@@ -244,11 +244,33 @@ class SentimentAnalyzer:
         "욕하", "까는", "깐다", "비판",
     ]
 
-    def analyze_locally(self, text):
+    # 사전 필터링: LLM 분석이 불필요한 제목 패턴
+    SKIP_LLM_PATTERNS = re.compile(
+        r'^[\d\s.,:;!?]+$'       # 숫자/구두점만
+        r'|^https?://'           # URL
+        r'|^.{0,3}$'             # 3글자 이하
+    )
+
+    def _needs_llm(self, text, local_score, matched_count):
+        """이 제목이 LLM 분석이 필요한지 판단합니다.
+
+        Returns: True=LLM 필요, False=로컬 사전으로 충분
+        """
+        # 패턴 기반 스킵
+        if self.SKIP_LLM_PATTERNS.match(text):
+            return False
+        # 감성 단어 2개 이상 매칭 + 점수가 명확 → 로컬로 충분
+        if matched_count >= 2 and abs(local_score) > 0.3:
+            return False
+        return True
+
+    def analyze_locally(self, text, return_details=False):
         """로컬 사전을 사용하여 텍스트의 감성 스코어를 계산합니다.
 
         긴 키워드 우선 매칭: '무과금'이 매칭되면 내부의 '과금'은 건너뜁니다.
         부정어 window: 키워드 앞 6글자 또는 뒤 6글자 내에 부정어가 있으면 점수를 반전합니다.
+
+        return_details=True → (score, matched_count) 튜플 반환
         """
         score = 0.0
         count = 0
@@ -277,7 +299,10 @@ class SentimentAnalyzer:
                     matched_positions |= positions
                 start = idx + 1
 
-        return score / count if count > 0 else 0.0
+        final_score = score / count if count > 0 else 0.0
+        if return_details:
+            return final_score, count
+        return final_score
 
     # ── 멀티 프로바이더 LLM 배치 분석 ────────────────────────────
 
@@ -433,17 +458,33 @@ class SentimentAnalyzer:
 
     def analyze_batch_with_llm(self, posts, gallery_name):
         """
-        LLM 배치 분석 + 로컬 사전 폴백.
+        사전 필터링 → LLM 배치 분석 → 로컬 사전 폴백.
         posts: [{'id': int, 'title': str}, ...]
-        returns: {post_id: score, ...}
+        returns: {post_id: {'score': float, 'method': str}, ...}
         """
         results = {}
+
+        # 1단계: 사전 필터링 — LLM이 필요 없는 글은 로컬 분석으로 처리
+        llm_needed = []
+        skipped_count = 0
+        for post in posts:
+            local_score, matched_count = self.analyze_locally(post['title'], return_details=True)
+            if self._needs_llm(post['title'], local_score, matched_count):
+                llm_needed.append(post)
+            else:
+                results[post['id']] = {'score': local_score, 'method': 'lexicon'}
+                skipped_count += 1
+
+        if skipped_count > 0:
+            print(f"   >> 사전 필터링: {skipped_count}개 스킵 (로컬 충분), {len(llm_needed)}개 LLM 대상")
+
+        # 2단계: LLM 배치 분석
         batch_count = 0
         max_batches = 1 if self.test_mode else None
+        llm_results = {}
 
-        # 현재 프로바이더의 batch_size로 청크 분할
         i = 0
-        while i < len(posts):
+        while i < len(llm_needed):
             if max_batches is not None and batch_count >= max_batches:
                 if self.test_mode:
                     print(f"   [TEST_MODE] LLM 배치 {max_batches}회 제한 도달, 나머지는 로컬 분석")
@@ -455,27 +496,32 @@ class SentimentAnalyzer:
                 break
 
             batch_size = provider['batch_size']
-            chunk = posts[i:i + batch_size]
+            chunk = llm_needed[i:i + batch_size]
 
             batch_results = self._call_llm_batch(provider, chunk, gallery_name)
             if batch_results:
-                results.update(batch_results)
+                llm_results.update(batch_results)
                 batch_count += 1
             else:
-                # 실패한 배치는 카운트하지 않고, 같은 청크를 다음 프로바이더로 재시도
                 continue
 
             i += batch_size
 
-            # RPM 제한 대응: 호출 간 sleep
-            if i < len(posts):
+            if i < len(llm_needed):
                 time.sleep(provider['sleep'])
 
-        # LLM 미처리분 → 로컬 사전 분석
+        # LLM 결과를 results에 반영
+        for post_id, score in llm_results.items():
+            results[post_id] = {'score': score, 'method': 'llm'}
+
+        # 3단계: LLM 미처리분 → 로컬 사전 폴백
         local_fallback_count = 0
         for post in posts:
             if post['id'] not in results:
-                results[post['id']] = self.analyze_locally(post['title'])
+                results[post['id']] = {
+                    'score': self.analyze_locally(post['title']),
+                    'method': 'lexicon'
+                }
                 local_fallback_count += 1
 
         if local_fallback_count > 0:
@@ -486,7 +532,11 @@ class SentimentAnalyzer:
     # ── 메인 처리 ────────────────────────────────────────────────
 
     def process_all_unbound_posts(self, force=False):
-        """게시글 감성 분석. LLM 배치 분석 → RPC 벌크 업데이트."""
+        """게시글 감성 분석. 사전 필터링 → LLM 배치 → RPC 벌크 업데이트.
+
+        force=False: 미분석 글만 처리
+        force=True:  전체 재분석 (단, 이미 LLM 분석된 글은 스킵)
+        """
         from config import TARGET_GALLERIES
 
         FETCH_SIZE = 1000
@@ -496,7 +546,7 @@ class SentimentAnalyzer:
 
         try:
             while True:
-                query = self.db.client.table('posts').select('id, title, gallery_id')
+                query = self.db.client.table('posts').select('id, title, gallery_id, analysis_method')
                 if not force:
                     query = query.is_('analyzed_at', 'null')
 
@@ -504,10 +554,27 @@ class SentimentAnalyzer:
                 if not hasattr(response, 'data') or not response.data:
                     break
 
+                # force=True일 때 이미 LLM 분석된 글은 스킵
+                posts_to_analyze = response.data
+                if force:
+                    already_llm = [p for p in response.data if p.get('analysis_method') == 'llm']
+                    posts_to_analyze = [p for p in response.data if p.get('analysis_method') != 'llm']
+                    if already_llm:
+                        print(f"   >> LLM 기분석 {len(already_llm)}개 스킵")
+
+                if not posts_to_analyze:
+                    batch_count = len(response.data)
+                    total_count += batch_count
+                    offset += batch_count
+                    if batch_count < FETCH_SIZE:
+                        break
+                    continue
+
                 # gallery_id별 그룹핑 → LLM 배치 분석
-                sorted_posts = sorted(response.data, key=lambda x: x['gallery_id'])
+                sorted_posts = sorted(posts_to_analyze, key=lambda x: x['gallery_id'])
                 ids = []
                 scores = []
+                methods = []
 
                 for gallery_id, group_iter in groupby(sorted_posts, key=lambda x: x['gallery_id']):
                     group = list(group_iter)
@@ -518,22 +585,31 @@ class SentimentAnalyzer:
                     batch_results = self.analyze_batch_with_llm(group, gallery_name)
 
                     for post in group:
-                        score = batch_results.get(post['id'], self.analyze_locally(post['title']))
-                        ids.append(post['id'])
-                        scores.append(score)
+                        result = batch_results.get(post['id'])
+                        if result:
+                            ids.append(post['id'])
+                            scores.append(result['score'])
+                            methods.append(result['method'])
+                        else:
+                            local_score = self.analyze_locally(post['title'])
+                            ids.append(post['id'])
+                            scores.append(local_score)
+                            methods.append('lexicon')
 
-                # RPC로 벌크 업데이트 (500개씩)
+                # RPC로 벌크 업데이트 (500개씩, analysis_method 포함)
                 for i in range(0, len(ids), RPC_BATCH):
                     batch_ids = ids[i:i + RPC_BATCH]
                     batch_scores = scores[i:i + RPC_BATCH]
+                    batch_methods = methods[i:i + RPC_BATCH]
                     try:
                         self.db.client.rpc('bulk_update_sentiment', {
                             'ids': batch_ids,
-                            'scores': batch_scores
+                            'scores': batch_scores,
+                            'methods': batch_methods
                         }).execute()
                     except Exception as rpc_err:
                         print(f">> RPC 실패, 개별 업데이트 폴백: {rpc_err}")
-                        self._fallback_individual_update(batch_ids, batch_scores)
+                        self._fallback_individual_update(batch_ids, batch_scores, batch_methods)
 
                 batch_count = len(response.data)
                 total_count += batch_count
@@ -548,22 +624,22 @@ class SentimentAnalyzer:
             print(f"게시글 감성 분석 처리 중 오류: {e}")
             return total_count
 
-    def _fallback_individual_update(self, ids, scores):
+    def _fallback_individual_update(self, ids, scores, methods=None):
         """RPC 실패 시 개별 update + 쿨다운 폴백."""
         now = datetime.now().isoformat()
         for i, (pid, score) in enumerate(zip(ids, scores)):
+            update_data = {
+                'sentiment_score': score,
+                'analyzed_at': now
+            }
+            if methods:
+                update_data['analysis_method'] = methods[i]
             try:
-                self.db.client.table('posts').update({
-                    'sentiment_score': score,
-                    'analyzed_at': now
-                }).eq('id', pid).execute()
+                self.db.client.table('posts').update(update_data).eq('id', pid).execute()
             except Exception:
                 time.sleep(5)
                 try:
-                    self.db.client.table('posts').update({
-                        'sentiment_score': score,
-                        'analyzed_at': now
-                    }).eq('id', pid).execute()
+                    self.db.client.table('posts').update(update_data).eq('id', pid).execute()
                 except:
                     pass
             if (i + 1) % 200 == 0:
