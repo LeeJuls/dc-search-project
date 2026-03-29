@@ -4,11 +4,44 @@ from db_manager import DBManager
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import os
+import threading
+import time as _time
 
 # 한국 시간대 (UTC+9)
 KST = timezone(timedelta(hours=9))
 
 app = Flask(__name__)
+
+# 인메모리 캐시 (Supabase 반복 호출 방지)
+_cache = {}
+_cache_lock = threading.Lock()
+CACHE_TTL = int(os.environ.get('CACHE_TTL_SECONDS', 600))  # 기본 10분
+
+
+def get_sentiment_data_cached(gallery_id, days, is_minor=True):
+    """캐시된 감성 데이터를 반환합니다. TTL 내이면 Supabase 호출 없이 즉시 반환."""
+    key = (gallery_id, days)
+    now = _time.monotonic()
+
+    # 캐시 히트 (lock 불필요)
+    entry = _cache.get(key)
+    if entry and (now - entry['time']) < CACHE_TTL:
+        return entry['data']
+
+    # 캐시 미스 - lock으로 중복 쿼리 방지
+    with _cache_lock:
+        # Double-check after lock
+        entry = _cache.get(key)
+        if entry and (now - entry['time']) < CACHE_TTL:
+            return entry['data']
+
+        data = get_sentiment_data(gallery_id, days, is_minor)
+
+        # 에러 응답(str)은 캐싱하지 않음
+        if isinstance(data, dict):
+            _cache[key] = {'data': data, 'time': _time.monotonic()}
+
+        return data
 
 def get_sentiment_data(gallery_id, days, is_minor=True):
     """DB에서 데이터를 가져와 분석에 필요한 형태로 반환합니다."""
@@ -90,7 +123,7 @@ def index():
     current_gallery = next((g for g in TARGET_GALLERIES if g['id'] == gallery_id), None)
     is_minor = current_gallery['is_minor'] if current_gallery else True
 
-    data = get_sentiment_data(gallery_id, days, is_minor=is_minor)
+    data = get_sentiment_data_cached(gallery_id, days, is_minor=is_minor)
     
     # 디버깅 문자열인 경우 바로 화면에 에러를 띄웁니다.
     if isinstance(data, str) and data.startswith('ERROR'):
