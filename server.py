@@ -20,16 +20,28 @@ def get_sentiment_data(gallery_id, days, is_minor=True):
     try:
         if not db.client:
             return 'ERROR: DBManager의 client가 None입니다. (환경변수 SUPABASE_URL, SUPABASE_KEY 명칭 오타 또는 누락 의심)'
-            
-        response = db.client.table('posts').select('gallery_id, post_num, title, sentiment_score, views, recommend, comment_count') \
-            .eq('gallery_id', gallery_id) \
-            .gte('date_standard', target_date) \
-            .order('date_standard', desc=True) \
-            .limit(5000) \
-            .execute()
-            
-        if hasattr(response, 'data') and response.data:
-            df = pd.DataFrame(response.data)
+
+        # Supabase max_rows=1000 제한 대응: 페이지네이션으로 전체 조회
+        FETCH_SIZE = 1000
+        all_data = []
+        offset = 0
+        while True:
+            response = db.client.table('posts').select('gallery_id, post_num, title, sentiment_score, views, recommend, comment_count') \
+                .eq('gallery_id', gallery_id) \
+                .gte('date_standard', target_date) \
+                .order('date_standard', desc=True) \
+                .range(offset, offset + FETCH_SIZE - 1) \
+                .execute()
+            if hasattr(response, 'data') and response.data:
+                all_data.extend(response.data)
+                if len(response.data) < FETCH_SIZE:
+                    break
+                offset += FETCH_SIZE
+            else:
+                break
+
+        if all_data:
+            df = pd.DataFrame(all_data)
         else:
             return f'ERROR: Supabase와 100% 정상 통신되었습니다!! 하지만 반환된 데이터가 0건입니다. (요청한 날짜: {target_date}, 대상: {gallery_id})'
     except Exception as e:
