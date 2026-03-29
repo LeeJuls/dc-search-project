@@ -16,6 +16,7 @@ app = Flask(__name__)
 _cache = {}
 _cache_lock = threading.Lock()
 CACHE_TTL = int(os.environ.get('CACHE_TTL_SECONDS', 600))  # 기본 10분
+TREND_CACHE_TTL = int(os.environ.get('TREND_CACHE_TTL_SECONDS', 1800))  # 트렌드 30분
 
 
 def get_sentiment_data_cached(gallery_id, days, is_minor=True):
@@ -104,6 +105,54 @@ def get_sentiment_data(gallery_id, days, is_minor=True):
         'neg_posts': neg_df.head(10).to_dict('records')
     }
 
+def get_daily_trend(gallery_id, num_days=14):
+    """14일간 일별 통계 조회. 빈 날짜는 0으로 채움."""
+    db = DBManager()
+    end_date = datetime.now(KST).date()
+    start_date = end_date - timedelta(days=num_days - 1)
+
+    response = db.client.table('daily_stats') \
+        .select('stat_date, total_count, pos_count, neg_count, neu_count, avg_score') \
+        .eq('gallery_id', gallery_id) \
+        .gte('stat_date', start_date.isoformat()) \
+        .order('stat_date') \
+        .execute()
+
+    result_map = {row['stat_date']: row for row in (response.data or [])}
+    filled = []
+    for i in range(num_days):
+        d = (start_date + timedelta(days=i)).isoformat()
+        if d in result_map:
+            row = result_map[d]
+            total = row['total_count'] or 1
+            row['pos_pct'] = round(row['pos_count'] / total * 100, 1)
+            row['neg_pct'] = round(row['neg_count'] / total * 100, 1)
+            filled.append(row)
+        else:
+            filled.append({'stat_date': d, 'total_count': 0, 'pos_count': 0,
+                          'neg_count': 0, 'pos_pct': 0, 'neg_pct': 0, 'avg_score': 0})
+    return filled
+
+
+def get_daily_trend_cached(gallery_id, num_days=14):
+    """캐시된 트렌드 데이터를 반환합니다. TTL 30분."""
+    key = ('trend', gallery_id, num_days)
+    now = _time.monotonic()
+
+    entry = _cache.get(key)
+    if entry and (now - entry['time']) < TREND_CACHE_TTL:
+        return entry['data']
+
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (now - entry['time']) < TREND_CACHE_TTL:
+            return entry['data']
+
+        data = get_daily_trend(gallery_id, num_days)
+        _cache[key] = {'data': data, 'time': _time.monotonic()}
+        return data
+
+
 @app.route('/')
 def index():
     # 기본값은 config.py에 정의된 첫 번째 갤러리
@@ -129,7 +178,9 @@ def index():
     if isinstance(data, str) and data.startswith('ERROR'):
         return f"<h1>렌더 서버 에러 추적 모드</h1><h3 style='color:red;'>{data}</h3>"
 
-    return render_template('dashboard.html', data=data, gallery_id=gallery_id, days=days, target_galleries=TARGET_GALLERIES)
+    trend_data = get_daily_trend_cached(gallery_id)
+
+    return render_template('dashboard.html', data=data, gallery_id=gallery_id, days=days, target_galleries=TARGET_GALLERIES, trend_data=trend_data)
 
 if __name__ == '__main__':
     # 템플릿 폴더가 없으면 생성

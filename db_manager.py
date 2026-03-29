@@ -78,6 +78,18 @@ class DBManager:
             
         return 0
 
+    def upsert_daily_stats(self, gallery_id, stat_date, total, pos, neg, neu, avg_score):
+        """일별 통계를 daily_stats 테이블에 upsert합니다."""
+        self.client.table('daily_stats').upsert({
+            'gallery_id': gallery_id,
+            'stat_date': stat_date,
+            'total_count': total,
+            'pos_count': pos,
+            'neg_count': neg,
+            'neu_count': neu,
+            'avg_score': round(avg_score, 4)
+        }, on_conflict='gallery_id,stat_date').execute()
+
 if __name__ == "__main__":
     db = DBManager()
     print("Supabase 연결 테스트 완료.")

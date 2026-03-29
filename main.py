@@ -99,7 +99,31 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True,
     analyzed_count = analyzer.process_all_unbound_posts(force=force_reanalyze)
     print(f">> 분석 완료: {analyzed_count}개의 게시글 분석됨")
 
-    # 4. 리포트 생성 단계
+    # 4. 당일 통계 집계 저장 (daily_stats)
+    today_str = datetime.now(KST).strftime('%Y-%m-%d')
+    today_start = today_str + ' 00:00:00'
+    tomorrow_start = (datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+
+    try:
+        response = db.client.table('posts').select('sentiment_score') \
+            .eq('gallery_id', gallery_id) \
+            .gte('date_standard', today_start) \
+            .lt('date_standard', tomorrow_start) \
+            .execute()
+
+        if response.data:
+            scores = [r['sentiment_score'] or 0 for r in response.data]
+            total = len(scores)
+            pos = sum(1 for s in scores if s > 0.1)
+            neg = sum(1 for s in scores if s < -0.1)
+            neu = total - pos - neg
+            avg = sum(scores) / total
+            db.upsert_daily_stats(gallery_id, today_str, total, pos, neg, neu, avg)
+            print(f">> [{gallery_id}] 당일({today_str}) 통계 저장: {total}건")
+    except Exception as e:
+        print(f"당일 통계 집계 오류: {e}")
+
+    # 5. 리포트 생성 단계
     reporter.generate_daily_report(gallery_id, days=1)
     reporter.generate_daily_report(gallery_id, days=7)
     

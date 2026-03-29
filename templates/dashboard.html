@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DC Insight - {% set current = target_galleries | selectattr("id", "equalto", gallery_id) | list %}{{ current[0].name if current else gallery_id }}</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <style>
         :root {
             --primary: #6366f1;
@@ -395,6 +396,15 @@
             </div>
         </div>
 
+        {% if trend_data %}
+        <div class="sentiment-card">
+            <h2 style="font-size:1.3rem; font-weight:800; margin-bottom:1.5rem;">일별 여론 추이 (14일)</h2>
+            <div style="position:relative; height:300px;">
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="detail-grid">
             <div class="list-section list-pos">
                 <h2>👍 긍정 대표글 Top 10 (공감순)</h2>
@@ -441,5 +451,121 @@
         updateCountdown();
         setInterval(updateCountdown, 1000);
     </script>
+
+    {% if trend_data %}
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof Chart === 'undefined') return;
+
+        const trendData = {{ trend_data | tojson }};
+        const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+        const labels = trendData.map(function(d) {
+            const dt = new Date(d.stat_date + 'T00:00:00');
+            const mm = String(dt.getMonth() + 1).padStart(2, '0');
+            const dd = String(dt.getDate()).padStart(2, '0');
+            return mm + '/' + dd + '(' + dayNames[dt.getDay()] + ')';
+        });
+
+        const allPcts = trendData.map(function(d) { return Math.max(d.pos_pct, d.neg_pct); });
+        const rawMax = Math.max.apply(null, allPcts);
+        const maxPct = Math.min(Math.ceil((rawMax + 0.1) / 5) * 5, 100);
+
+        const style = getComputedStyle(document.documentElement);
+        const primaryColor = style.getPropertyValue('--primary').trim() || '#6366f1';
+        const posColor = style.getPropertyValue('--pos').trim() || '#10b981';
+        const negColor = style.getPropertyValue('--neg').trim() || '#ef4444';
+
+        new Chart(document.getElementById('trendChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: '총 게시글',
+                        data: trendData.map(function(d) { return d.total_count; }),
+                        backgroundColor: primaryColor + '59',
+                        borderColor: primaryColor,
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        yAxisID: 'y',
+                        order: 2
+                    },
+                    {
+                        label: '긍정 비율(%)',
+                        data: trendData.map(function(d) { return d.pos_pct; }),
+                        type: 'line',
+                        borderColor: posColor,
+                        backgroundColor: posColor + '33',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        pointBackgroundColor: posColor,
+                        tension: 0.3,
+                        fill: false,
+                        yAxisID: 'y1',
+                        order: 1
+                    },
+                    {
+                        label: '부정 비율(%)',
+                        data: trendData.map(function(d) { return d.neg_pct; }),
+                        type: 'line',
+                        borderColor: negColor,
+                        backgroundColor: negColor + '33',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        pointBackgroundColor: negColor,
+                        tension: 0.3,
+                        fill: false,
+                        yAxisID: 'y1',
+                        order: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                if (ctx.dataset.yAxisID === 'y1') {
+                                    return ctx.dataset.label + ': ' + ctx.parsed.y + '%';
+                                }
+                                return ctx.dataset.label + ': ' + ctx.parsed.y + '건';
+                            }
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: { usePointStyle: true, padding: 15 }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { maxRotation: 45, font: { size: 11 } },
+                        grid: { display: false }
+                    },
+                    y: {
+                        position: 'left',
+                        title: { display: true, text: '게시글 수' },
+                        beginAtZero: true,
+                        grid: { color: '#f1f5f9' }
+                    },
+                    y1: {
+                        position: 'right',
+                        title: { display: true, text: '비율(%)' },
+                        min: 0,
+                        max: maxPct,
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+    });
+    </script>
+    {% endif %}
 </body>
 </html>
