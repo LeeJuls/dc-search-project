@@ -21,28 +21,28 @@ class SentimentAnalyzer:
     """
 
     # ── 프로바이더 설정 ──────────────────────────────────────────────
+    # 무료 티어: 모델별 각 20 RPD → 모델 수 × 20 × 15 = 일일 LLM 분석량
     PROVIDER_CHAIN = [
-        {
-            'name': 'gemini_flash_lite',
-            'rpd': 1000, 'rpm': 15, 'batch_size': 15,
-            'model': 'gemini-2.5-flash-lite',
-            'type': 'gemini',
-            'sleep': 4,
-        },
-        {
-            'name': 'gemini_flash',
-            'rpd': 250, 'rpm': 10, 'batch_size': 15,
-            'model': 'gemini-2.5-flash',
-            'type': 'gemini',
-            'sleep': 6,
-        },
-        {
-            'name': 'openrouter_llama',
-            'rpd': 50, 'rpm': 10, 'batch_size': 10,
-            'model': 'meta-llama/llama-3.2-3b-instruct:free',
-            'type': 'openrouter',
-            'sleep': 6,
-        },
+        {'name': 'gemini_25_flash_lite', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-2.5-flash-lite', 'type': 'gemini', 'sleep': 4},
+        {'name': 'gemini_25_flash', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-2.5-flash', 'type': 'gemini', 'sleep': 4},
+        {'name': 'gemini_20_flash', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-2.0-flash', 'type': 'gemini', 'sleep': 4},
+        {'name': 'gemini_20_flash_lite', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-2.0-flash-lite', 'type': 'gemini', 'sleep': 4},
+        {'name': 'gemini_25_pro', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-2.5-pro', 'type': 'gemini', 'sleep': 6},
+        {'name': 'gemini_3_flash', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-3-flash-preview', 'type': 'gemini', 'sleep': 4},
+        {'name': 'gemini_3_pro', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-3-pro-preview', 'type': 'gemini', 'sleep': 6},
+        {'name': 'gemini_31_pro', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-3.1-pro-preview', 'type': 'gemini', 'sleep': 6},
+        {'name': 'gemini_31_flash_lite', 'rpd': 20, 'batch_size': 100,
+         'model': 'gemini-3.1-flash-lite-preview', 'type': 'gemini', 'sleep': 4},
+        {'name': 'openrouter_llama', 'rpd': 50, 'batch_size': 10,
+         'model': 'meta-llama/llama-3.2-3b-instruct:free', 'type': 'openrouter', 'sleep': 6},
     ]
 
     def __init__(self, db_manager):
@@ -341,7 +341,7 @@ class SentimentAnalyzer:
 {posts_str}
 
 [응답 형식] 반드시 JSON만 출력하세요. 설명이나 마크다운 없이 순수 JSON만:
-{{{{"id숫자": {{"score": 0.0, "target": "분석대상"}}, ...}}}}"""
+{{{{"id숫자": 0.0, ...}}}}"""
 
     def _parse_llm_response(self, content):
         """LLM 응답에서 JSON을 안전하게 파싱합니다."""
