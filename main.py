@@ -100,9 +100,10 @@ def run_daily_process(gallery_id='ovensmash', days_ago=7, is_minor=True,
     print(f">> 분석 완료: {analyzed_count}개의 게시글 분석됨")
 
     # 4. 당일 통계 집계 저장 (daily_stats)
-    today_str = datetime.now(KST).strftime('%Y-%m-%d')
-    today_start = today_str + ' 00:00:00'
-    tomorrow_start = (datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+    today_dt = datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_str = today_dt.strftime('%Y-%m-%d')
+    today_start = today_dt.isoformat()
+    tomorrow_start = (today_dt + timedelta(days=1)).isoformat()
 
     try:
         response = db.client.table('posts').select('sentiment_score') \

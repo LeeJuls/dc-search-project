@@ -36,7 +36,7 @@ class Summarizer:
         """요약용 데이터를 수집합니다."""
         target_date = (datetime.now(KST) - timedelta(days=days)).replace(
             hour=0, minute=0, second=0, microsecond=0
-        ).strftime('%Y-%m-%d %H:%M:%S')
+        ).isoformat()
 
         FETCH_SIZE = 1000
         all_data = []
