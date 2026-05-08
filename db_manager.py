@@ -49,7 +49,11 @@ class DBManager:
         
         # 추가 컬럼 세팅
         records['gallery_id'] = gallery_id
-        
+
+        # 활발한 갤러리에서 페이지 시프트로 인한 batch 내 중복 제거
+        # (같은 batch에 같은 post_num이 들어오면 ON CONFLICT가 실패하기 때문)
+        records = records.drop_duplicates(subset=['post_num'], keep='last')
+
         # NaN 처리 (Supabase JSON 직렬화 오류 방지)
         records = records.fillna(0)
         
