@@ -78,6 +78,22 @@ class DBManager:
             
         return 0
 
+    def get_latest_summary(self, gallery_id, period):
+        """가장 최근 AI 요약을 조회합니다."""
+        try:
+            response = self.client.table('summaries') \
+                .select('summary_text, model_used, generated_at') \
+                .eq('gallery_id', gallery_id) \
+                .eq('period', period) \
+                .order('generated_at', desc=True) \
+                .limit(1) \
+                .execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+        except Exception as e:
+            print(f"AI 요약 조회 오류: {e}")
+        return None
+
     def upsert_daily_stats(self, gallery_id, stat_date, total, pos, neg, neu, avg_score):
         """일별 통계를 daily_stats 테이블에 upsert합니다."""
         self.client.table('daily_stats').upsert({

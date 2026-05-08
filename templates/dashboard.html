@@ -411,6 +411,20 @@
         </div>
         {% endif %}
 
+        {% if summary_data %}
+        <div class="sentiment-card" style="margin-bottom: 2rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h2 style="font-size:1.3rem; font-weight:800; margin:0;">AI 여론 요약 ({{ days }}일)</h2>
+                <span style="font-size:0.8rem; color:#94a3b8;">{{ summary_data.generated_at[:16] | replace('T', ' ') }} 생성</span>
+            </div>
+            <p style="line-height:1.9; color:#334155; font-size:1.05rem; margin:0;">{{ summary_data.summary_text }}</p>
+        </div>
+        {% else %}
+        <div class="sentiment-card" style="margin-bottom: 2rem; text-align:center; padding:2rem;">
+            <p style="color:#94a3b8; margin:0;">AI 여론 요약이 아직 생성되지 않았습니다. 곧 자동으로 업데이트됩니다.</p>
+        </div>
+        {% endif %}
+
         <div class="detail-grid">
             <div class="list-section list-pos">
                 <h2>👍 긍정 대표글 Top 10 (공감순)</h2>

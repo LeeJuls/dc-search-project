@@ -1,12 +1,12 @@
-name: 🤖 LLM Lexicon Updater
+name: 🤖 AI Summary Generator
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 3,15 * * *'
   workflow_dispatch:
 
 jobs:
-  update-lexicon:
+  generate-summaries:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,12 +24,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run LLM Lexicon Update
+    - name: Generate AI Summaries
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        LLM_ONLY: 'true'
       run: |
-        python -c "from scheduler import process_galleries; process_galleries()"
+        python -c "from summarizer import Summarizer; Summarizer().generate_all_summaries()"

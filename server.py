@@ -17,6 +17,7 @@ _cache = {}
 _cache_lock = threading.Lock()
 CACHE_TTL = int(os.environ.get('CACHE_TTL_SECONDS', 600))  # 기본 10분
 TREND_CACHE_TTL = int(os.environ.get('TREND_CACHE_TTL_SECONDS', 1800))  # 트렌드 30분
+SUMMARY_CACHE_TTL = 3600  # AI 요약 1시간
 
 
 def get_sentiment_data_cached(gallery_id, days, is_minor=True):
@@ -153,6 +154,27 @@ def get_daily_trend_cached(gallery_id, num_days=14):
         return data
 
 
+def get_summary_cached(gallery_id, period):
+    """캐시된 AI 요약을 반환합니다. TTL 1시간."""
+    key = ('summary', gallery_id, period)
+    now = _time.monotonic()
+
+    entry = _cache.get(key)
+    if entry and (now - entry['time']) < SUMMARY_CACHE_TTL:
+        return entry['data']
+
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (now - entry['time']) < SUMMARY_CACHE_TTL:
+            return entry['data']
+
+        db = DBManager()
+        data = db.get_latest_summary(gallery_id, period)
+        if data:
+            _cache[key] = {'data': data, 'time': _time.monotonic()}
+        return data
+
+
 @app.route('/')
 def index():
     # 기본값은 config.py에 정의된 첫 번째 갤러리
@@ -179,8 +201,9 @@ def index():
         return f"<h1>렌더 서버 에러 추적 모드</h1><h3 style='color:red;'>{data}</h3>"
 
     trend_data = get_daily_trend_cached(gallery_id)
+    summary_data = get_summary_cached(gallery_id, days)
 
-    return render_template('dashboard.html', data=data, gallery_id=gallery_id, days=days, target_galleries=TARGET_GALLERIES, trend_data=trend_data)
+    return render_template('dashboard.html', data=data, gallery_id=gallery_id, days=days, target_galleries=TARGET_GALLERIES, trend_data=trend_data, summary_data=summary_data)
 
 if __name__ == '__main__':
     # 템플릿 폴더가 없으면 생성

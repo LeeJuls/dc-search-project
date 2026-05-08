@@ -25,8 +25,7 @@ class SentimentAnalyzer:
     PROVIDER_CHAIN = [
         {'name': 'gemini_25_flash_lite', 'rpd': 20, 'batch_size': 100,
          'model': 'gemini-2.5-flash-lite', 'type': 'gemini', 'sleep': 4},
-        {'name': 'gemini_25_flash', 'rpd': 20, 'batch_size': 100,
-         'model': 'gemini-2.5-flash', 'type': 'gemini', 'sleep': 4},
+        # gemini-2.5-flash는 요약 전용으로 분리 (summarizer.py)
         {'name': 'gemini_3_flash', 'rpd': 20, 'batch_size': 100,
          'model': 'gemini-3-flash-preview', 'type': 'gemini', 'sleep': 4},
         {'name': 'gemini_31_flash_lite', 'rpd': 20, 'batch_size': 100,
